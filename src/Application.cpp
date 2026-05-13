@@ -2,14 +2,17 @@
 
 #include "Application.h"
 #include "config.h"
-#include "IO/Wireless.h"
 #include "IO/LED/LEDStripManager.h"
-#include "Sync/SyncManager.h"
 #include "IO/StatusLed.h"
 #include "IO/TimeProfiler.h"
+#include <Wireless.h>
 #include <math.h>
 
 //----------------------------------------------------------------------------
+namespace
+{
+constexpr uint16_t EFFECT_SYNC_PROPERTY_KEY = 0x0F10;
+}
 
 Application *Application::getInstance()
 {
@@ -154,6 +157,7 @@ void Application::begin()
   setupEffects();
   setupSequences();
   setupWireless();
+  setupMesh();
   setupBLE();
 
   for (auto &pair : ledManager->getStrips())
@@ -177,40 +181,6 @@ void Application::begin()
       Serial.println("    | Effects: " + String(segment->effectCount()));
     }
   }
-
-  // Initialize SyncManager
-  SyncManager *syncMgr = SyncManager::getInstance();
-  syncMgr->begin();
-
-#ifdef ENABLE_SYNC
-  // Set up callbacks for sync events
-  syncMgr->setDeviceDiscoveredCallback([this](const DiscoveredDevice &device)
-                                       { Serial.println("Application: Device discovered - ID: 0x" + String(device.deviceId, HEX)); });
-
-  syncMgr->setGroupFoundCallback([this](const GroupAdvert &advert)
-                                 { Serial.println("Application: Group found - ID: 0x" + String(advert.groupId, HEX)); });
-
-  syncMgr->setGroupCreatedCallback([this](const GroupInfo &group)
-                                   { Serial.println("Application: Group created - ID: 0x" + String(group.groupId, HEX)); });
-
-  syncMgr->setGroupJoinedCallback([this](const GroupInfo &group)
-                                  { Serial.println("Application: Joined group - ID: 0x" + String(group.groupId, HEX)); });
-
-  syncMgr->setGroupLeftCallback([this]()
-                                { Serial.println("Application: Left group"); });
-
-  syncMgr->setTimeSyncCallback([this](uint32_t syncedTime)
-                               {
-                                 Serial.println("Application: Time synchronized - synced time: " + String(syncedTime));
-                                 // TODO: Use synchronized time for effect timing coordination
-                               });
-
-  syncMgr->setEffectSyncCallback([this](const EffectSyncState &effectState)
-                                 {
-                                  Serial.println("Application: Effect sync received");
-                                  handleSyncedEffects(effectState); });
-
-#endif
 
   // unlockSequence->trigger(); // car is most likely unlocked when device is powered on
   unlockSequence->setActive(false);
@@ -312,6 +282,7 @@ void Application::loop()
   timeProfiler.start("updateSync", TimeUnit::MICROSECONDS);
   SyncManager *syncMgr = SyncManager::getInstance();
   syncMgr->loop();
+  updateSyncStatusLed();
 
   timeProfiler.stop("updateSync");
 
@@ -373,7 +344,7 @@ void Application::handleRemoteEffects()
   bool isSyncing = syncMgr->isInGroup() && syncMgr->getGroupInfo().members.size() > 1;
   bool isMaster = syncMgr->isGroupMaster();
 
-  if (isMaster && syncMgr->isEffectSyncEnabled())
+  if (isMaster && isEffectSyncEnabled())
   {
     EffectSyncState effectState = {};
 
@@ -384,7 +355,7 @@ void Application::handleRemoteEffects()
     effectState.colorFadeSyncData = colorFadeEffect->getSyncData();
     effectState.commitSyncData = commitEffect->getSyncData();
 
-    syncMgr->setEffectSyncState(effectState);
+    setEffectSyncState(effectState);
   }
 }
 
@@ -408,4 +379,149 @@ void Application::setupBLE()
   bleManager->begin();
 
   Serial.println("Application: BLE setup complete");
+}
+
+void Application::setupMesh()
+{
+  SyncManager *syncMgr = SyncManager::getInstance();
+  syncMgr->setTransport(Wireless::getInstance());
+  syncMgr->setModePersistence(
+      []() -> uint8_t
+      { return preferences.getUChar("sync_mode", static_cast<uint8_t>(SyncMode::SOLO)); },
+      [](uint8_t mode)
+      { preferences.putUChar("sync_mode", mode); });
+  syncMgr->setDeviceIdProvider([]() -> uint32_t
+                               { return deviceInfo.serialNumber != 0 ? deviceInfo.serialNumber : 0; });
+
+  setupEffectSync();
+  syncMgr->begin();
+
+#ifdef ENABLE_SYNC
+  syncMgr->setDeviceDiscoveredCallback([this](const DiscoveredDevice &device)
+                                       { Serial.println("Application: Device discovered - ID: 0x" + String(device.deviceId, HEX)); });
+
+  syncMgr->setGroupFoundCallback([this](const GroupAdvert &advert)
+                                 { Serial.println("Application: Group found - ID: 0x" + String(advert.groupId, HEX)); });
+
+  syncMgr->setGroupCreatedCallback([this](const GroupInfo &group)
+                                   { Serial.println("Application: Group created - ID: 0x" + String(group.groupId, HEX)); });
+
+  syncMgr->setGroupJoinedCallback([this](const GroupInfo &group)
+                                  { Serial.println("Application: Joined group - ID: 0x" + String(group.groupId, HEX)); });
+
+  syncMgr->setGroupLeftCallback([this]()
+                                { Serial.println("Application: Left group"); });
+
+  syncMgr->setTimeSyncCallback([this](uint32_t syncedTime)
+                               {
+                                 Serial.println("Application: Time synchronized - synced time: " + String(syncedTime));
+                                 // TODO: Use synchronized time for effect timing coordination
+                               });
+#endif
+}
+
+void Application::setupEffectSync()
+{
+  effectSyncProperty = SyncManager::getInstance()->property<EffectSyncState>(EFFECT_SYNC_PROPERTY_KEY);
+  effectSyncProperty.onChange([this](uint32_t deviceId, const EffectSyncState &effectState)
+                              {
+                                SyncManager *syncMgr = SyncManager::getInstance();
+                                if (!syncMgr->isInGroup() || syncMgr->isGroupMaster() || deviceId == syncMgr->getDeviceId())
+                                {
+                                  return;
+                                }
+
+                                Serial.println("Application: Effect sync received");
+                                handleSyncedEffects(effectState);
+                              });
+}
+
+void Application::setEffectSyncState(const EffectSyncState &effectState)
+{
+  SyncManager *syncMgr = SyncManager::getInstance();
+  if (!effectSyncEnabled || !syncMgr->isInGroup() || !syncMgr->isGroupMaster())
+  {
+    return;
+  }
+
+  effectSyncProperty.set(effectState);
+}
+
+bool Application::isEffectSyncEnabled() const
+{
+  return effectSyncEnabled;
+}
+
+void Application::updateSyncStatusLed()
+{
+  SyncManager *syncMgr = SyncManager::getInstance();
+  uint32_t currentTime = millis();
+  bool fastBlink = (currentTime % 500) < 250;
+  bool slowBlink = (currentTime % 1000) < 500;
+  bool verySlowBlink = (currentTime % 2000) < 1000;
+
+  if (getMode() == ApplicationMode::OFF)
+  {
+    statusLed2.setColor(0, 0, 0);
+    return;
+  }
+
+  if (syncMgr->isTimeSynced() && syncMgr->isInGroup())
+  {
+    uint32_t syncTime = syncMgr->getSyncedTime();
+    slowBlink = (syncTime % 1000) < 500;
+  }
+
+  switch (syncMgr->getSyncMode())
+  {
+  case SyncMode::SOLO:
+    statusLed2.setColor(100, 100, 100);
+    break;
+  case SyncMode::JOIN:
+    if (!syncMgr->isInGroup())
+    {
+      statusLed2.setColor(fastBlink ? 255 : 0, fastBlink ? 255 : 0, 0);
+    }
+    else if (!syncMgr->isTimeSynced())
+    {
+      statusLed2.setColor(fastBlink ? 255 : 0, fastBlink ? 165 : 0, 0);
+    }
+    else
+    {
+      statusLed2.setColor(0, 0, slowBlink ? 255 : 0);
+    }
+    break;
+  case SyncMode::HOST:
+    if (!syncMgr->isInGroup())
+    {
+      statusLed2.setColor(verySlowBlink ? 255 : 0, 0, 0);
+    }
+    else if (syncMgr->isGroupMaster())
+    {
+      size_t memberCount = syncMgr->getGroupInfo().members.size();
+      if (memberCount < 2)
+      {
+        statusLed2.setColor(255, 0, 255);
+      }
+      else if (syncMgr->isTimeSynced())
+      {
+        statusLed2.setColor(slowBlink ? 255 : 0, 0, slowBlink ? 255 : 0);
+      }
+      else
+      {
+        statusLed2.setColor(fastBlink ? 255 : 0, 0, fastBlink ? 255 : 0);
+      }
+    }
+    else
+    {
+      statusLed2.setColor(0, fastBlink ? 255 : 0, fastBlink ? 255 : 0);
+    }
+    break;
+  case SyncMode::AUTO:
+    statusLed2.setColor(slowBlink ? 0 : 0, slowBlink ? 255 : 0, slowBlink ? 128 : 0);
+    break;
+  default:
+    statusLed2.setColor(fastBlink ? 255 : 0, 0, 0);
+    break;
+  }
 }

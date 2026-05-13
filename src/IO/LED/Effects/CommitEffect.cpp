@@ -1,4 +1,5 @@
 #include "CommitEffect.h"
+#include <Mesh.h>
 #include <algorithm>
 
 CommitEffect::CommitEffect(uint8_t priority, bool transparent)

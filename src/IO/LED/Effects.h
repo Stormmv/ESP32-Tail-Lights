@@ -1,8 +1,8 @@
 #pragma once
 
 #include "LEDStrip.h"
+#include "Types.h"
 #include <stdint.h>
-#include "Sync/SyncManager.h"
 
 struct Color;
 class LEDSegment;

@@ -1,4 +1,5 @@
 #include "ColorFadeEffect.h"
+#include <Mesh.h>
 #include <cmath>
 
 // Hardcoded color list - attractive color sequence

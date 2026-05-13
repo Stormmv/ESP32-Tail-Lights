@@ -26,11 +26,10 @@
 
 #include "IO/GPIO.h"
 #include "IO/Inputs.h"
-#include "IO/Wireless.h"
+#include <Mesh.h>
 
 #include "SerialMenu.h"
 #include "IO/Inputs.h"
-#include "Sync/SyncManager.h"
 #include "IO/BLE.h"
 
 #define NUM_MODES 4
@@ -157,9 +156,16 @@ public:
 private:
   void updateInputs();
   void setupWireless();
+  void setupMesh();
+  void setupEffectSync();
   void setupBLE();
+  void setEffectSyncState(const EffectSyncState &effectState);
+  bool isEffectSyncEnabled() const;
+  void updateSyncStatusLed();
 
   bool appInitialized;
+  bool effectSyncEnabled = true;
+  PropertyHandle<EffectSyncState> effectSyncProperty;
 
   // Menu system
   MenuContext menuContext;

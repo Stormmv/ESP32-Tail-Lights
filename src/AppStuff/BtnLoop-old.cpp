@@ -1,6 +1,7 @@
 #include "Application.h"
 #include "IO/StatusLed.h"
-#include "Sync/SyncManager.h"
+#include <Mesh.h>
+#include "MeshSupport.h"
 
 void Application::btnLoop()
 {
@@ -17,7 +18,9 @@ void Application::btnLoop()
   if (BtnPrev.clicks == 1)
   {
     // cycle through modes
-    SyncManager::getInstance()->setSyncMode(static_cast<SyncMode>((static_cast<int>(SyncManager::getInstance()->getSyncMode()) + 1) % 3));
+    SyncManager *syncMgr = SyncManager::getInstance();
+    uint8_t nextMode = (toLegacySyncModeValue(syncMgr->getSyncMode()) + 1) % 3;
+    syncMgr->setSyncMode(fromLegacySyncModeValue(nextMode));
   }
 
   switch (mode)
@@ -40,5 +43,5 @@ void Application::btnLoop()
     break;
   }
 
-  SyncManager::getInstance()->updateSyncedLED();
+  Application::getInstance()->updateSyncStatusLed();
 }

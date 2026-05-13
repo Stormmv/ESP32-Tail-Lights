@@ -1,4 +1,5 @@
 #include "NightRiderEffect.h"
+#include <Mesh.h>
 #include <cmath>
 
 NightRiderEffect::NightRiderEffect(uint8_t priority, bool transparent)
