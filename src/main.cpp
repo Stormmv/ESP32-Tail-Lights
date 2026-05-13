@@ -4,7 +4,6 @@
 #include "config.h"
 
 #include "IO/GPIO.h"
-#include "IO/Wireless.h"
 #include "Application.h"
 #include "SerialMenu.h"
 #include "IO/StatusLed.h"
@@ -14,6 +13,7 @@
 #endif
 #include "IO/ScreenManager.h"
 #include "IO/TimeProfiler.h"
+#include <Wireless.h>
 
 #include "Screens/StartUp.h"
 #include "Screens/Home.h"
@@ -91,7 +91,7 @@ void setup()
   }
 #endif
 
-  wireless.setup();
+  Wireless::getInstance()->setup();
 
   app = Application::getInstance();
 
@@ -141,8 +141,6 @@ void loop()
   unsigned long currentTime = millis();
   timeProfiler.start("mainLoop", TimeUnit::MICROSECONDS);
   timeProfiler.increment("mainLoopFps");
-
-  wireless.loop(); // does nothing
 
   if (millis() - batteryLoopMs > 1000)
   {

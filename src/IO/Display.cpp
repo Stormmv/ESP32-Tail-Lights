@@ -1,7 +1,7 @@
 #include "Display.h"
 
 #ifdef ENABLE_DISPLAY
-#include "Wireless.h"
+#include <Wireless.h>
 #include "TimeProfiler.h"
 
 Display::Display()
@@ -81,7 +81,7 @@ void Display::drawTopBar(void)
   u8g2.setFont(u8g2_font_open_iconic_all_1x_t);
   if (WiFi.status() == WL_CONNECTED)
     u8g2.drawGlyph(DISPLAY_WIDTH - 8 - battW - 2, 9, 0x00f8); // wifi icon
-  else if (wireless.isSetupDone())
+  else if (Wireless::getInstance()->isSetupDone())
     u8g2.drawGlyph(DISPLAY_WIDTH - 8 - battW - 2, 9, 0x00c6); // link icon
   else
     u8g2.drawGlyph(DISPLAY_WIDTH - 8 - battW - 2, 9, 0x0079); // x icon

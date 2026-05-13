@@ -4,7 +4,8 @@
 #include "TimeProfiler.h"
 #include <esp_system.h>
 #include "Battery.h"
-#include "../Sync/SyncManager.h"
+#include "../MeshSupport.h"
+#include <Mesh.h>
 
 // Initialize static instance
 BLEManager *BLEManager::instance = nullptr;
@@ -301,7 +302,7 @@ BLESyncSendData BLEManager::prepareSyncData()
   uint32_t now = millis();
 
   // Basic sync information
-  data.mode = static_cast<uint8_t>(syncMgr->getSyncMode());
+  data.mode = toLegacySyncModeValue(syncMgr->getSyncMode());
   data.deviceId = ourDeviceId;
   data.groupId = groupInfo.groupId;
   data.masterDeviceId = groupInfo.masterDeviceId;
@@ -323,7 +324,7 @@ BLESyncSendData BLEManager::prepareSyncData()
 
     const auto &device = devicePair.second;
     data.discoveredDevices[deviceIdx].deviceId = device.deviceId;
-    memcpy(data.discoveredDevices[deviceIdx].mac, device.mac, 6);
+    copyTransportAddressToMac(device.address, data.discoveredDevices[deviceIdx].mac);
     data.discoveredDevices[deviceIdx].timeSinceLastSeen = now - device.lastSeen;
     data.discoveredDevices[deviceIdx].isThisDevice = (device.deviceId == ourDeviceId);
 
@@ -350,7 +351,7 @@ BLESyncSendData BLEManager::prepareSyncData()
     const auto &group = discoveredGroups[i];
     data.discoveredGroups[i].groupId = group.groupId;
     data.discoveredGroups[i].masterDeviceId = group.masterDeviceId;
-    memcpy(data.discoveredGroups[i].masterMac, group.masterMac, 6);
+    copyTransportAddressToMac(group.masterAddress, data.discoveredGroups[i].masterMac);
     data.discoveredGroups[i].timeSinceLastSeen = now - group.lastSeen;
     data.discoveredGroups[i].isCurrentGroup = (group.groupId == groupInfo.groupId);
     data.discoveredGroups[i].canJoin = (groupInfo.groupId == 0 || group.groupId != groupInfo.groupId);
@@ -365,7 +366,7 @@ BLESyncSendData BLEManager::prepareSyncData()
 
     const auto &member = memberPair.second;
     data.groupMembers[memberIdx].deviceId = member.deviceId;
-    memcpy(data.groupMembers[memberIdx].mac, member.mac, 6);
+    copyTransportAddressToMac(member.address, data.groupMembers[memberIdx].mac);
     data.groupMembers[memberIdx].isGroupMaster = (member.deviceId == groupInfo.masterDeviceId);
     data.groupMembers[memberIdx].isThisDevice = (member.deviceId == ourDeviceId);
 
@@ -547,7 +548,7 @@ void BLEManager::handleSyncWrite(BLECharacteristic *pCharacteristic)
 
   if (data->command == 0)
   {
-    syncMgr->setSyncMode(static_cast<SyncMode>(data->mode));
+    syncMgr->setSyncMode(fromLegacySyncModeValue(data->mode));
   }
   else if (data->command == 1) // these are wip
   {

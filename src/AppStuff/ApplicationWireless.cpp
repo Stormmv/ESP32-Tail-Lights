@@ -1,9 +1,10 @@
 #include "Application.h"
-#include "IO/Wireless.h"
 #include "IO/LED/Effects.h"
 #include "IO/LED/LEDStripManager.h"
-#include "Sync/SyncManager.h"
 #include "IO/TimeProfiler.h"
+#include "MeshSupport.h"
+#include <Mesh.h>
+#include <Wireless.h>
 
 // Command constants
 constexpr uint8_t CMD_PING = 0xe0;
@@ -194,13 +195,13 @@ struct SyncModeCmd
 void Application::setupWireless()
 {
   // Ping command (0xe0) - send current mode and enabled strips
-  wireless.addOnReceiveFor(CMD_PING, [this](fullPacket *fp)
+  Wireless::getInstance()->addOnReceiveFor(CMD_PING, [this](WirelessFrame *frame)
                            {
                              lastRemotePing = millis();
 
                              LEDStripManager *ledManager = LEDStripManager::getInstance();
 
-                             data_packet pTX = {0};
+                             TransportPacket pTX = {};
                              pTX.type = CMD_PING;
 
                              PingCmd pCmd;
@@ -213,16 +214,16 @@ void Application::setupWireless()
                              pTX.len = sizeof(pCmd);
                              memcpy(pTX.data, &pCmd, sizeof(pCmd));
 
-                             wireless.send(&pTX, fp->mac);
+                             Wireless::getInstance()->send(&pTX, frame->mac);
                              //
                            });
 
   // Set mode command (0xe1)
-  wireless.addOnReceiveFor(CMD_SET_MODE, [this](fullPacket *fp)
+  Wireless::getInstance()->addOnReceiveFor(CMD_SET_MODE, [this](WirelessFrame *frame)
                            {
                              lastRemotePing = millis();
 
-                             uint8_t *data = fp->p.data;
+                             uint8_t *data = frame->packet.data;
                              uint8_t rxMode = data[0];
 
                              switch (rxMode)
@@ -243,7 +244,7 @@ void Application::setupWireless()
                                break;
                              }
 
-                             data_packet pTX = {0};
+                             TransportPacket pTX = {};
                              pTX.type = CMD_SET_MODE;
                              pTX.len = 1;
 
@@ -267,18 +268,18 @@ void Application::setupWireless()
                                break;
                              }
 
-                             wireless.send(&pTX, fp->mac);
+                             Wireless::getInstance()->send(&pTX, frame->mac);
                              //
                            });
 
   // Get effects command (0xe3) - Returns current effects for each strip
-  wireless.addOnReceiveFor(CMD_GET_EFFECTS, [this](fullPacket *fp)
+  Wireless::getInstance()->addOnReceiveFor(CMD_GET_EFFECTS, [this](WirelessFrame *frame)
                            {
                              lastRemotePing = millis();
 
                              LEDStripManager *ledManager = LEDStripManager::getInstance();
 
-                             data_packet pTX = {0};
+                             TransportPacket pTX = {};
                              pTX.type = CMD_GET_EFFECTS;
 
                              EffectsCmd eCmd = {0};
@@ -314,19 +315,19 @@ void Application::setupWireless()
                              pTX.len = sizeof(eCmd);
                              memcpy(pTX.data, &eCmd, sizeof(eCmd));
 
-                             wireless.send(&pTX, fp->mac);
+                             Wireless::getInstance()->send(&pTX, frame->mac);
                              //
                            });
 
   // Set effects command (0xe2) - Set effects for each strip
-  wireless.addOnReceiveFor(CMD_SET_EFFECTS, [this](fullPacket *fp)
+  Wireless::getInstance()->addOnReceiveFor(CMD_SET_EFFECTS, [this](WirelessFrame *frame)
                            {
                              lastRemotePing = millis();
 
                              LEDStripManager *ledManager = LEDStripManager::getInstance();
 
                              EffectsCmd eCmd = {0};
-                             memcpy(&eCmd, fp->p.data, sizeof(eCmd));
+                             memcpy(&eCmd, frame->packet.data, sizeof(eCmd));
 
                              leftIndicatorEffect->setActive(eCmd.leftIndicator);
                              rightIndicatorEffect->setActive(eCmd.rightIndicator);
@@ -359,7 +360,7 @@ void Application::setupWireless()
 
                              SyncManager *syncMgr = SyncManager::getInstance();
 
-                             if (syncMgr->isGroupMaster() && syncMgr->isEffectSyncEnabled())
+                             if (syncMgr->isGroupMaster() && isEffectSyncEnabled())
                              {
                                EffectSyncState effectState = {};
 
@@ -371,19 +372,18 @@ void Application::setupWireless()
                                effectState.commitSyncData = commitEffect->getSyncData();
                                effectState.serviceLightsSyncData = serviceLightsEffect->getSyncData();
 
-                               syncMgr->setEffectSyncState(effectState);
-                               syncMgr->sendEffectState();
+                               setEffectSyncState(effectState);
                              }
 
                              //
                            });
 
-  wireless.addOnReceiveFor(CAR_CMD_SET_STRIP_ACTIVE, [this](fullPacket *fp)
+  Wireless::getInstance()->addOnReceiveFor(CAR_CMD_SET_STRIP_ACTIVE, [this](WirelessFrame *frame)
                            {
                              lastRemotePing = millis();
 
                              StripActiveCmd sCmd = {0};
-                             memcpy(&sCmd, fp->p.data, sizeof(sCmd));
+                             memcpy(&sCmd, frame->packet.data, sizeof(sCmd));
 
                              LEDStripManager *ledManager = LEDStripManager::getInstance();
                              ledManager->setStripActive(LEDStripType::HEADLIGHT, sCmd.headlight);
@@ -398,16 +398,16 @@ void Application::setupWireless()
                              sCmd.underglow = ledManager->isStripActive(LEDStripType::UNDERGLOW);
                              sCmd.interior = ledManager->isStripActive(LEDStripType::INTERIOR);
 
-                             data_packet pTX = {0};
+                             TransportPacket pTX = {};
                              pTX.type = CAR_CMD_SET_STRIP_ACTIVE;
                              pTX.len = sizeof(sCmdTX);
                              memcpy(pTX.data, &sCmdTX, sizeof(sCmdTX));
 
-                             wireless.send(&pTX, fp->mac);
+                             Wireless::getInstance()->send(&pTX, frame->mac);
                              //
                            });
 
-  wireless.addOnReceiveFor(CAR_CMD_GET_STRIP_ACTIVE, [this](fullPacket *fp)
+  Wireless::getInstance()->addOnReceiveFor(CAR_CMD_GET_STRIP_ACTIVE, [this](WirelessFrame *frame)
                            {
                              lastRemotePing = millis();
 
@@ -418,21 +418,21 @@ void Application::setupWireless()
                              sCmdTX.underglow = ledManager->isStripActive(LEDStripType::UNDERGLOW);
                              sCmdTX.interior = ledManager->isStripActive(LEDStripType::INTERIOR);
 
-                             data_packet pTX = {0};
+                             TransportPacket pTX = {};
                              pTX.type = CAR_CMD_GET_STRIP_ACTIVE;
                              pTX.len = sizeof(sCmdTX);
                              memcpy(pTX.data, &sCmdTX, sizeof(sCmdTX));
 
-                             wireless.send(&pTX, fp->mac);
+                             Wireless::getInstance()->send(&pTX, frame->mac);
                              //
                            });
 
-  wireless.addOnReceiveFor(CAR_CMD_SET_INPUTS, [this](fullPacket *fp)
+  Wireless::getInstance()->addOnReceiveFor(CAR_CMD_SET_INPUTS, [this](WirelessFrame *frame)
                            {
                              lastRemotePing = millis();
 
                              InputsCmd iCmd = {0};
-                             memcpy(&iCmd, fp->p.data, sizeof(iCmd));
+                             memcpy(&iCmd, frame->packet.data, sizeof(iCmd));
 
                              if (mode != ApplicationMode::TEST)
                                return;
@@ -447,7 +447,7 @@ void Application::setupWireless()
                              //
                            });
 
-  wireless.addOnReceiveFor(CAR_CMD_GET_INPUTS, [this](fullPacket *fp)
+  Wireless::getInstance()->addOnReceiveFor(CAR_CMD_GET_INPUTS, [this](WirelessFrame *frame)
                            {
                              lastRemotePing = millis();
 
@@ -459,21 +459,21 @@ void Application::setupWireless()
                              iCmd.brake = brakeInput.get();
                              iCmd.reverse = reverseInput.get();
 
-                             data_packet pTX = {0};
+                             TransportPacket pTX = {};
                              pTX.type = CAR_CMD_GET_INPUTS;
                              pTX.len = sizeof(iCmd);
                              memcpy(pTX.data, &iCmd, sizeof(iCmd));
 
-                             wireless.send(&pTX, fp->mac);
+                             Wireless::getInstance()->send(&pTX, frame->mac);
                              //
                            });
 
-  wireless.addOnReceiveFor(CAR_CMD_TRIGGER_SEQUENCE, [this](fullPacket *fp)
+  Wireless::getInstance()->addOnReceiveFor(CAR_CMD_TRIGGER_SEQUENCE, [this](WirelessFrame *frame)
                            {
                              lastRemotePing = millis();
 
                              TriggerSequenceCmd tCmd = {0};
-                             memcpy(&tCmd, fp->p.data, sizeof(tCmd));
+                             memcpy(&tCmd, frame->packet.data, sizeof(tCmd));
 
                              switch (tCmd.sequence)
                              {
@@ -497,11 +497,11 @@ void Application::setupWireless()
                              //
                            });
 
-  wireless.addOnReceiveFor(CAR_CMD_GET_STATS, [this](fullPacket *fp)
+  Wireless::getInstance()->addOnReceiveFor(CAR_CMD_GET_STATS, [this](WirelessFrame *frame)
                            {
                              lastRemotePing = millis();
 
-                             data_packet pTX = {0};
+                             TransportPacket pTX = {};
                              pTX.type = CAR_CMD_GET_STATS;
 
                              AppStats stats = {0};
@@ -515,14 +515,14 @@ void Application::setupWireless()
                              pTX.len = sizeof(AppStats);
                              memcpy(pTX.data, &stats, sizeof(AppStats));
 
-                             wireless.send(&pTX, fp->mac);
+                             Wireless::getInstance()->send(&pTX, frame->mac);
                              //
                            });
 
   // Sync management commands
 
   // Get discovered devices (0xe8)
-  wireless.addOnReceiveFor(CMD_SYNC_GET_DEVICES, [this](fullPacket *fp)
+  Wireless::getInstance()->addOnReceiveFor(CMD_SYNC_GET_DEVICES, [this](WirelessFrame *frame)
                            {
                              lastRemotePing = millis();
 
@@ -532,7 +532,7 @@ void Application::setupWireless()
                              uint32_t ourDeviceId = syncMgr->getDeviceId();
                              uint32_t now = millis();
 
-                             data_packet pTX = {0};
+                             TransportPacket pTX = {};
                              pTX.type = CMD_SYNC_GET_DEVICES;
 
                              SyncDevicesResponse response = {0};
@@ -547,7 +547,7 @@ void Application::setupWireless()
                                const auto &device = devicePair.second;
 
                                response.devices[i].deviceId = device.deviceId;
-                               memcpy(response.devices[i].mac, device.mac, 6);
+                               copyTransportAddressToMac(device.address, response.devices[i].mac);
                                response.devices[i].lastSeen = device.lastSeen;
                                response.devices[i].timeSinceLastSeen = now - device.lastSeen;
                                response.devices[i].isThisDevice = (device.deviceId == ourDeviceId);
@@ -572,12 +572,12 @@ void Application::setupWireless()
                              pTX.len = sizeof(response);
                              memcpy(pTX.data, &response, sizeof(response));
 
-                             wireless.send(&pTX, fp->mac);
+                             Wireless::getInstance()->send(&pTX, frame->mac);
                              //
                            });
 
   // Get discovered groups (0xe9)
-  wireless.addOnReceiveFor(CMD_SYNC_GET_GROUPS, [this](fullPacket *fp)
+  Wireless::getInstance()->addOnReceiveFor(CMD_SYNC_GET_GROUPS, [this](WirelessFrame *frame)
                            {
                              lastRemotePing = millis();
 
@@ -587,7 +587,7 @@ void Application::setupWireless()
                              uint32_t ourGroupId = groupInfo.groupId;
                              uint32_t now = millis();
 
-                             data_packet pTX = {0};
+                             TransportPacket pTX = {};
                              pTX.type = CMD_SYNC_GET_GROUPS;
 
                              SyncGroupsResponse response = {0};
@@ -600,7 +600,7 @@ void Application::setupWireless()
                                const auto &group = discoveredGroups[i];
                                response.groups[i].groupId = group.groupId;
                                response.groups[i].masterDeviceId = group.masterDeviceId;
-                               memcpy(response.groups[i].masterMac, group.masterMac, 6);
+                               copyTransportAddressToMac(group.masterAddress, response.groups[i].masterMac);
                                response.groups[i].lastSeen = group.lastSeen;
                                response.groups[i].timeSinceLastSeen = now - group.lastSeen;
                                response.groups[i].isCurrentGroup = (group.groupId == ourGroupId);
@@ -610,12 +610,12 @@ void Application::setupWireless()
                              pTX.len = sizeof(response);
                              memcpy(pTX.data, &response, sizeof(response));
 
-                             wireless.send(&pTX, fp->mac);
+                             Wireless::getInstance()->send(&pTX, frame->mac);
                              //
                            });
 
   // Get current group info (0xea)
-  wireless.addOnReceiveFor(CMD_SYNC_GET_GROUP_INFO, [this](fullPacket *fp)
+  Wireless::getInstance()->addOnReceiveFor(CMD_SYNC_GET_GROUP_INFO, [this](WirelessFrame *frame)
                            {
                              lastRemotePing = millis();
 
@@ -625,7 +625,7 @@ void Application::setupWireless()
                              uint32_t ourDeviceId = syncMgr->getDeviceId();
                              uint32_t now = millis();
 
-                             data_packet pTX = {0};
+                             TransportPacket pTX = {};
                              pTX.type = CMD_SYNC_GET_GROUP_INFO;
 
                              SyncCurrentGroupInfo response = {0};
@@ -647,7 +647,7 @@ void Application::setupWireless()
 
                                const auto &member = memberPair.second;
                                response.members[i].deviceId = member.deviceId;
-                               memcpy(response.members[i].mac, member.mac, 6);
+                               copyTransportAddressToMac(member.address, response.members[i].mac);
                                response.members[i].isGroupMaster = (member.deviceId == groupInfo.masterDeviceId);
                                response.members[i].isThisDevice = (member.deviceId == ourDeviceId);
 
@@ -668,17 +668,17 @@ void Application::setupWireless()
                              pTX.len = sizeof(response);
                              memcpy(pTX.data, &response, sizeof(response));
 
-                             wireless.send(&pTX, fp->mac);
+                             Wireless::getInstance()->send(&pTX, frame->mac);
                              //
                            });
 
   // Join group (0xeb)
-  wireless.addOnReceiveFor(CMD_SYNC_JOIN_GROUP, [this](fullPacket *fp)
+  Wireless::getInstance()->addOnReceiveFor(CMD_SYNC_JOIN_GROUP, [this](WirelessFrame *frame)
                            {
                              lastRemotePing = millis();
 
                              SyncJoinGroupCmd cmd = {0};
-                             memcpy(&cmd, fp->p.data, sizeof(cmd));
+                             memcpy(&cmd, frame->packet.data, sizeof(cmd));
 
                              SyncManager *syncMgr = SyncManager::getInstance();
                              syncMgr->joinGroup(cmd.groupId);
@@ -686,17 +686,17 @@ void Application::setupWireless()
                              // Send back current group info as confirmation
                              const auto &groupInfo = syncMgr->getGroupInfo();
 
-                             data_packet pTX = {0};
+                             TransportPacket pTX = {};
                              pTX.type = CMD_SYNC_JOIN_GROUP;
                              pTX.len = sizeof(uint32_t);
                              memcpy(pTX.data, &groupInfo.groupId, sizeof(uint32_t));
 
-                             wireless.send(&pTX, fp->mac);
+                             Wireless::getInstance()->send(&pTX, frame->mac);
                              //
                            });
 
   // Leave group (0xec)
-  wireless.addOnReceiveFor(CMD_SYNC_LEAVE_GROUP, [this](fullPacket *fp)
+  Wireless::getInstance()->addOnReceiveFor(CMD_SYNC_LEAVE_GROUP, [this](WirelessFrame *frame)
                            {
                              lastRemotePing = millis();
 
@@ -704,23 +704,23 @@ void Application::setupWireless()
                              syncMgr->leaveGroup();
 
                              // Send back confirmation (group ID should be 0 now)
-                             data_packet pTX = {0};
+                             TransportPacket pTX = {};
                              pTX.type = CMD_SYNC_LEAVE_GROUP;
                              pTX.len = sizeof(uint32_t);
                              uint32_t groupId = 0;
                              memcpy(pTX.data, &groupId, sizeof(uint32_t));
 
-                             wireless.send(&pTX, fp->mac);
+                             Wireless::getInstance()->send(&pTX, frame->mac);
                              //
                            });
 
   // Create group (0xed)
-  wireless.addOnReceiveFor(CMD_SYNC_CREATE_GROUP, [this](fullPacket *fp)
+  Wireless::getInstance()->addOnReceiveFor(CMD_SYNC_CREATE_GROUP, [this](WirelessFrame *frame)
                            {
                              lastRemotePing = millis();
 
                              SyncCreateGroupCmd cmd = {0};
-                             memcpy(&cmd, fp->p.data, sizeof(cmd));
+                             memcpy(&cmd, frame->packet.data, sizeof(cmd));
 
                              SyncManager *syncMgr = SyncManager::getInstance();
                              syncMgr->createGroup(cmd.groupId); // 0 = auto-generate
@@ -728,7 +728,7 @@ void Application::setupWireless()
                              // Send back created group info as confirmation
                              const auto &groupInfo = syncMgr->getGroupInfo();
 
-                             data_packet pTX = {0};
+                             TransportPacket pTX = {};
                              pTX.type = CMD_SYNC_CREATE_GROUP;
 
                              SyncCurrentGroupInfo response = {0};
@@ -742,12 +742,12 @@ void Application::setupWireless()
                              pTX.len = sizeof(response);
                              memcpy(pTX.data, &response, sizeof(response));
 
-                             wireless.send(&pTX, fp->mac);
+                             Wireless::getInstance()->send(&pTX, frame->mac);
                              //
                            });
 
   // Get comprehensive status (0xee)
-  wireless.addOnReceiveFor(CMD_SYNC_GET_STATUS, [this](fullPacket *fp)
+  Wireless::getInstance()->addOnReceiveFor(CMD_SYNC_GET_STATUS, [this](WirelessFrame *frame)
                            {
                              lastRemotePing = millis();
 
@@ -756,7 +756,7 @@ void Application::setupWireless()
                              const auto &discoveredDevices = syncMgr->getDiscoveredDevices();
                              const auto discoveredGroups = syncMgr->getDiscoveredGroups();
 
-                             data_packet pTX = {0};
+                             TransportPacket pTX = {};
                              pTX.type = CMD_SYNC_GET_STATUS;
 
                              SyncDetailedStatus response = {0};
@@ -770,51 +770,51 @@ void Application::setupWireless()
                              response.memberCount = groupInfo.members.size();
                              response.discoveredDeviceCount = std::min((size_t)255, discoveredDevices.size());
                              response.discoveredGroupCount = std::min((size_t)255, discoveredGroups.size());
-                             response.syncMode = static_cast<int>(syncMgr->getSyncMode());
+                             response.syncMode = toLegacySyncModeValue(syncMgr->getSyncMode());
 
                              pTX.len = sizeof(response);
                              memcpy(pTX.data, &response, sizeof(response));
 
-                             wireless.send(&pTX, fp->mac);
+                             Wireless::getInstance()->send(&pTX, frame->mac);
                              //
                            });
 
   // Set sync mode (0xef)
-  wireless.addOnReceiveFor(CMD_SYNC_SET_MODE, [this](fullPacket *fp)
+  Wireless::getInstance()->addOnReceiveFor(CMD_SYNC_SET_MODE, [this](WirelessFrame *frame)
                            {
                              lastRemotePing = millis();
 
                              SyncModeCmd cmd = {0};
-                             memcpy(&cmd, fp->p.data, sizeof(cmd));
+                             memcpy(&cmd, frame->packet.data, sizeof(cmd));
 
                              SyncManager *syncMgr = SyncManager::getInstance();
-                             syncMgr->setSyncMode(static_cast<SyncMode>(cmd.mode));
+                             syncMgr->setSyncMode(fromLegacySyncModeValue(cmd.mode));
 
                              // Send back confirmation
-                             data_packet pTX = {0};
+                             TransportPacket pTX = {};
                              pTX.type = CMD_SYNC_SET_MODE;
                              pTX.len = sizeof(uint8_t);
-                             uint8_t currentMode = static_cast<int>(syncMgr->getSyncMode());
+                             uint8_t currentMode = toLegacySyncModeValue(syncMgr->getSyncMode());
                              memcpy(pTX.data, &currentMode, sizeof(currentMode));
 
-                             wireless.send(&pTX, fp->mac);
+                             Wireless::getInstance()->send(&pTX, frame->mac);
                              //
                            });
 
   // Get sync mode (0xf0)
-  wireless.addOnReceiveFor(CMD_SYNC_GET_MODE, [this](fullPacket *fp)
+  Wireless::getInstance()->addOnReceiveFor(CMD_SYNC_GET_MODE, [this](WirelessFrame *frame)
                            {
                              lastRemotePing = millis();
 
                              SyncManager *syncMgr = SyncManager::getInstance();
 
-                             data_packet pTX = {0};
+                             TransportPacket pTX = {};
                              pTX.type = CMD_SYNC_GET_MODE;
                              pTX.len = sizeof(uint8_t);
-                             uint8_t mode = static_cast<int>(syncMgr->getSyncMode());
+                             uint8_t mode = toLegacySyncModeValue(syncMgr->getSyncMode());
                              memcpy(pTX.data, &mode, sizeof(mode));
 
-                             wireless.send(&pTX, fp->mac);
+                             Wireless::getInstance()->send(&pTX, frame->mac);
                              //
                            });
 }

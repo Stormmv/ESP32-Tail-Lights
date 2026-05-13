@@ -8,8 +8,9 @@
 #include "syncMenu.h"
 #include "mainMenu.h"
 #include "SerialMenu.h"
-#include "Sync/SyncManager.h"
+#include "MeshSupport.h"
 #include <Arduino.h>
+#include <Mesh.h>
 #include <map>
 #include <vector>
 
@@ -363,17 +364,7 @@ void listKnownDevices()
       Serial.println(String(F("  Last Seen: ")) + String(millis() - device.lastSeen) + F("ms ago"));
 
       // Format MAC address
-      String macStr = "";
-      for (int j = 0; j < 6; j++)
-      {
-        if (device.mac[j] < 16)
-          macStr += "0";
-        macStr += String(device.mac[j], HEX);
-        if (j < 5)
-          macStr += ":";
-      }
-      macStr.toUpperCase();
-      Serial.println(String(F("  MAC: ")) + macStr);
+      Serial.println(String(F("  MAC: ")) + formatTransportAddress(device.address));
       Serial.println();
       index++;
     }

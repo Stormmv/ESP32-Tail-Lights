@@ -1,4 +1,5 @@
 #include "RGBEffect.h"
+#include <Mesh.h>
 #include <cmath>
 
 RGBEffect::RGBEffect(uint8_t priority, bool transparent)

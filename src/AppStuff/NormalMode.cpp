@@ -1,5 +1,5 @@
 #include "Application.h"
-#include "Sync/SyncManager.h"
+#include <Mesh.h>
 
 void Application::handleNormalEffects()
 {
@@ -93,7 +93,7 @@ void Application::handleNormalEffects()
       brakeEffect->setIsReversing(reverseInput.get() || reverseLightEffect->isAnimating());
       reverseLightEffect->setActive(reverseInput.get());
 
-      if (isMaster && syncMgr->isEffectSyncEnabled())
+      if (isMaster && isEffectSyncEnabled())
       {
         EffectSyncState effectState = {};
 
@@ -104,7 +104,7 @@ void Application::handleNormalEffects()
         effectState.colorFadeSyncData = colorFadeEffect->getSyncData();
         effectState.commitSyncData = commitEffect->getSyncData();
 
-        syncMgr->setEffectSyncState(effectState);
+        setEffectSyncState(effectState);
       }
     }
   }

@@ -3,8 +3,9 @@
 #include "IO/Display.h"
 #include "IO/GPIO.h"
 #include "IO/Menu.h"
-#include "Sync/SyncManager.h"
+#include "MeshSupport.h"
 #include "IO/ScreenManager.h"
+#include <Mesh.h>
 
 namespace SyncScreenNamespace
 {
@@ -244,7 +245,7 @@ namespace SyncScreenNamespace
     }
 
     syncMgr = SyncManager::getInstance();
-    syncModeIndex = static_cast<int>(syncMgr->getSyncMode());
+    syncModeIndex = toLegacySyncModeValue(syncMgr->getSyncMode());
     syncModeItem.setCurrentIndex(syncModeIndex);
     syncRefreshData();
   }
@@ -365,7 +366,7 @@ namespace SyncScreenNamespace
       thisDeviceStatusItem.setName("Status: " + statusText);
     }
 
-    syncModeItem.setCurrentIndex(static_cast<int>(syncMgr->getSyncMode()));
+    syncModeItem.setCurrentIndex(toLegacySyncModeValue(syncMgr->getSyncMode()));
   }
 
   void updateCurrentGroupDisplay()
