@@ -115,7 +115,7 @@ void loadLEDConfig();
 
 #define OUTPUT_LED_1_PIN 3
 #define OUTPUT_LED_2_PIN 10
-#define OUTPUT_LED_3_PIN 11
+#define OUTPUT_LED_3_PIN 38
 #define OUTPUT_LED_4_PIN 12
 #endif
 
