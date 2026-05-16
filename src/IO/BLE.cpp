@@ -19,15 +19,110 @@ BLEManager *BLEManager::getInstance()
   return instance;
 }
 
+#if !BLE_TRANSPORT_AVAILABLE
+
 BLEManager::BLEManager()
-    : pServer(nullptr), pService(nullptr), app(nullptr), deviceConnected(false), connectionCount(0), lastPingUpdate(0), lastSyncUpdate(0)
+    : pServer(nullptr), pService(nullptr), pPingCharacteristic(nullptr), pModeCharacteristic(nullptr), pEffectsInfoCharacteristic(nullptr), pEffectsRequestCharacteristic(nullptr), pEffectsDataCharacteristic(nullptr), pEffectsCommandCharacteristic(nullptr), pStripActiveCharacteristic(nullptr), pSyncCharacteristic(nullptr), app(nullptr), deviceConnected(false), connectionCount(0), lastPingUpdate(0), lastSyncUpdate(0), lastEffectsStatePoll(0), selectedEffectsResource(EffectsResource::Catalog), selectedEffectsChunk(0), effectsStateRevision(0)
+{
+}
+
+BLEManager::~BLEManager() {}
+
+void BLEManager::begin()
+{
+  Serial.println("BLEManager: BLE transport unavailable on this target");
+}
+
+void BLEManager::loop() {}
+
+void BLEManager::end() {}
+
+bool BLEManager::isConnected()
+{
+  return false;
+}
+
+uint16_t BLEManager::getConnectionCount()
+{
+  return 0;
+}
+
+void BLEManager::setApplication(Application *application)
+{
+  app = application;
+}
+
+void BLEManager::updatePingData() {}
+
+void BLEManager::updateSyncData() {}
+
+void BLEManager::setupCharacteristics() {}
+
+void BLEManager::setupCallbacks() {}
+
+void BLEManager::handleModeWrite(BLECharacteristic *pCharacteristic) {}
+
+void BLEManager::handleEffectsRequestWrite(BLECharacteristic *pCharacteristic) {}
+
+void BLEManager::handleEffectsCommandWrite(BLECharacteristic *pCharacteristic) {}
+
+void BLEManager::handleStripActiveWrite(BLECharacteristic *pCharacteristic) {}
+
+void BLEManager::handleSyncWrite(BLECharacteristic *pCharacteristic) {}
+
+BLEPingData BLEManager::preparePingData()
+{
+  return {};
+}
+
+BLEModeData BLEManager::prepareModeData()
+{
+  return {};
+}
+
+BLEStripActiveData BLEManager::prepareStripActiveData()
+{
+  return {};
+}
+
+BLESyncSendData BLEManager::prepareSyncData()
+{
+  return {};
+}
+
+String BLEManager::prepareEffectsInfo()
+{
+  return "{\"protocolVersion\":2,\"available\":false}";
+}
+
+String BLEManager::prepareEffectsDataChunk()
+{
+  return "{}";
+}
+
+void BLEManager::refreshEffectsStateCache(bool notifyInfo) {}
+
+void BLEManager::updateEffectsInfoCharacteristic(bool notify) {}
+
+void BLEManager::updateEffectsDataCharacteristic(bool notify) {}
+
+void BLEManager::updateEffectsCommandResponse(const String &response, bool notify) {}
+
+#else
+
+BLEManager::BLEManager()
+    : pServer(nullptr), pService(nullptr), app(nullptr), deviceConnected(false), connectionCount(0), lastPingUpdate(0), lastSyncUpdate(0), lastEffectsStatePoll(0), selectedEffectsResource(EffectsResource::Catalog), selectedEffectsChunk(0), effectsStateRevision(0)
 {
   // Initialize characteristic pointers to nullptr
   pPingCharacteristic = nullptr;
   pModeCharacteristic = nullptr;
-  pEffectsCharacteristic = nullptr;
+  pEffectsInfoCharacteristic = nullptr;
+  pEffectsRequestCharacteristic = nullptr;
+  pEffectsDataCharacteristic = nullptr;
+  pEffectsCommandCharacteristic = nullptr;
   pStripActiveCharacteristic = nullptr;
   pSyncCharacteristic = nullptr;
+  lastEffectsCommandResponse = "{\"ok\":true,\"message\":\"ready\"}";
 }
 
 BLEManager::~BLEManager()
@@ -52,6 +147,10 @@ void BLEManager::begin()
 
   setupCharacteristics();
   setupCallbacks();
+  refreshEffectsStateCache(false);
+  updateEffectsInfoCharacteristic(false);
+  updateEffectsDataCharacteristic(false);
+  updateEffectsCommandResponse(lastEffectsCommandResponse, false);
 
   // Start the service
   pService->start();
@@ -81,11 +180,25 @@ void BLEManager::setupCharacteristics()
       BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
   pModeCharacteristic->addDescriptor(new BLE2902());
 
-  // Effects Characteristic (Read/Write + Notify)
-  pEffectsCharacteristic = pService->createCharacteristic(
-      EFFECTS_CHARACTERISTIC_UUID,
+  // Effects metadata and data transport
+  pEffectsInfoCharacteristic = pService->createCharacteristic(
+      EFFECTS_INFO_CHARACTERISTIC_UUID,
+      BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+  pEffectsInfoCharacteristic->addDescriptor(new BLE2902());
+
+  pEffectsRequestCharacteristic = pService->createCharacteristic(
+      EFFECTS_REQUEST_CHARACTERISTIC_UUID,
+      BLECharacteristic::PROPERTY_WRITE);
+
+  pEffectsDataCharacteristic = pService->createCharacteristic(
+      EFFECTS_DATA_CHARACTERISTIC_UUID,
+      BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
+  pEffectsDataCharacteristic->addDescriptor(new BLE2902());
+
+  pEffectsCommandCharacteristic = pService->createCharacteristic(
+      EFFECTS_COMMAND_CHARACTERISTIC_UUID,
       BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE | BLECharacteristic::PROPERTY_NOTIFY);
-  pEffectsCharacteristic->addDescriptor(new BLE2902());
+  pEffectsCommandCharacteristic->addDescriptor(new BLE2902());
 
   // Strip Active Characteristic (Read/Write + Notify)
   pStripActiveCharacteristic = pService->createCharacteristic(
@@ -105,7 +218,10 @@ void BLEManager::setupCallbacks()
   // Setup callbacks for all characteristics
   pPingCharacteristic->setCallbacks(new CarThingBLECharacteristicCallbacks(this, "Ping"));
   pModeCharacteristic->setCallbacks(new CarThingBLECharacteristicCallbacks(this, "Mode"));
-  pEffectsCharacteristic->setCallbacks(new CarThingBLECharacteristicCallbacks(this, "Effects"));
+  pEffectsInfoCharacteristic->setCallbacks(new CarThingBLECharacteristicCallbacks(this, "Effects Info"));
+  pEffectsRequestCharacteristic->setCallbacks(new CarThingBLECharacteristicCallbacks(this, "Effects Request"));
+  pEffectsDataCharacteristic->setCallbacks(new CarThingBLECharacteristicCallbacks(this, "Effects Data"));
+  pEffectsCommandCharacteristic->setCallbacks(new CarThingBLECharacteristicCallbacks(this, "Effects Command"));
   pStripActiveCharacteristic->setCallbacks(new CarThingBLECharacteristicCallbacks(this, "Strip Active"));
   pSyncCharacteristic->setCallbacks(new CarThingBLECharacteristicCallbacks(this, "Sync"));
 }
@@ -131,6 +247,12 @@ void BLEManager::loop()
   {
     updateSyncData();
     lastSyncUpdate = now;
+  }
+
+  if (now - lastEffectsStatePoll > 500)
+  {
+    refreshEffectsStateCache(true);
+    lastEffectsStatePoll = now;
   }
 }
 
@@ -216,61 +338,6 @@ BLEModeData BLEManager::prepareModeData()
   return data;
 }
 
-BLEEffectsData BLEManager::prepareEffectsData()
-{
-  BLEEffectsData data = {};
-
-  if (!app)
-    return data;
-
-  // Get effect states from the application
-  data.leftIndicator = app->leftIndicatorEffect ? app->leftIndicatorEffect->isActive() : false;
-  data.rightIndicator = app->rightIndicatorEffect ? app->rightIndicatorEffect->isActive() : false;
-
-  if (app->headlightEffect)
-  {
-    data.headlightMode = static_cast<uint8_t>(app->headlightEffect->getMode());
-    data.headlightSplit = app->headlightEffect->getSplit();
-    bool r, g, b;
-    app->headlightEffect->getColor(r, g, b);
-    data.headlightR = r;
-    data.headlightG = g;
-    data.headlightB = b;
-  }
-
-  if (app->taillightEffect)
-  {
-    data.taillightMode = static_cast<uint8_t>(app->taillightEffect->getMode());
-    data.taillightSplit = app->taillightEffect->getSplit();
-  }
-
-  data.brake = app->brakeInput.get();
-  data.reverse = app->reverseInput.get();
-  data.rgb = app->rgbEffect ? app->rgbEffect->isActive() : false;
-  data.nightrider = app->nightriderEffect ? app->nightriderEffect->isActive() : false;
-  data.police = app->policeEffect ? app->policeEffect->isActive() : false;
-  data.policeMode = app->policeEffect ? static_cast<uint8_t>(app->policeEffect->getMode()) : 0;
-  data.pulseWave = app->pulseWaveEffect ? app->pulseWaveEffect->isActive() : false;
-  data.aurora = app->auroraEffect ? app->auroraEffect->isActive() : false;
-  data.solidColor = app->solidColorEffect ? app->solidColorEffect->isActive() : false;
-  data.colorFade = app->colorFadeEffect ? app->colorFadeEffect->isActive() : false;
-  data.commit = app->commitEffect ? app->commitEffect->isActive() : false;
-  data.serviceLights = app->serviceLightsEffect ? app->serviceLightsEffect->isActive() : false;
-  data.serviceLightsMode = app->serviceLightsEffect ? static_cast<uint8_t>(app->serviceLightsEffect->getMode()) : 0;
-
-  if (app->solidColorEffect)
-  {
-    data.solidColorPreset = static_cast<uint8_t>(app->solidColorEffect->getColorPreset());
-    uint8_t r, g, b;
-    app->solidColorEffect->getCustomColor(r, g, b);
-    data.solidColorR = r;
-    data.solidColorG = g;
-    data.solidColorB = b;
-  }
-
-  return data;
-}
-
 BLEStripActiveData BLEManager::prepareStripActiveData()
 {
   BLEStripActiveData data = {};
@@ -285,6 +352,105 @@ BLEStripActiveData BLEManager::prepareStripActiveData()
   data.interior = ledManager->isStripActive(LEDStripType::INTERIOR);
 
   return data;
+}
+
+String BLEManager::prepareEffectsInfo()
+{
+  DynamicJsonDocument doc(1024);
+  JsonObject root = doc.to<JsonObject>();
+  root["protocolVersion"] = BLE_EFFECTS_PROTOCOL_VERSION;
+  root["schemaHash"] = BLEEffectsCatalog::getCatalogSchemaHash();
+  root["chunkSize"] = BLE_EFFECTS_CHUNK_SIZE;
+  root["catalogChunks"] = BLEEffectsCatalog::getCatalogChunkCount();
+  root["stateChunks"] = BLEEffectsCatalog::getChunkCountForPayload(cachedEffectsStateJson);
+  root["stateRevision"] = effectsStateRevision;
+
+  size_t effectCount = 0;
+  BLEEffectsCatalog::getEffects(effectCount);
+  root["effectCount"] = effectCount;
+
+  String json;
+  serializeJson(doc, json);
+  return json;
+}
+
+String BLEManager::prepareEffectsDataChunk()
+{
+  if (selectedEffectsResource == EffectsResource::Catalog)
+  {
+    return BLEEffectsCatalog::getCatalogChunk(selectedEffectsChunk);
+  }
+
+  return BLEEffectsCatalog::getPayloadChunk(cachedEffectsStateJson, selectedEffectsChunk);
+}
+
+void BLEManager::refreshEffectsStateCache(bool notifyInfo)
+{
+  if (!app)
+  {
+    return;
+  }
+
+  String nextStateJson = BLEEffectsCatalog::buildStateJson(*app);
+  if (nextStateJson == cachedEffectsStateJson)
+  {
+    return;
+  }
+
+  cachedEffectsStateJson = nextStateJson;
+  ++effectsStateRevision;
+  updateEffectsInfoCharacteristic(notifyInfo);
+
+  if (selectedEffectsResource == EffectsResource::State)
+  {
+    updateEffectsDataCharacteristic(notifyInfo);
+  }
+}
+
+void BLEManager::updateEffectsInfoCharacteristic(bool notify)
+{
+  if (!pEffectsInfoCharacteristic)
+  {
+    return;
+  }
+
+  lastEffectsInfoJson = prepareEffectsInfo();
+  pEffectsInfoCharacteristic->setValue(lastEffectsInfoJson.c_str());
+  if (notify && deviceConnected)
+  {
+    pEffectsInfoCharacteristic->notify();
+  }
+}
+
+void BLEManager::updateEffectsDataCharacteristic(bool notify)
+{
+  if (!pEffectsDataCharacteristic)
+  {
+    return;
+  }
+
+  String payload = prepareEffectsDataChunk();
+  pEffectsDataCharacteristic->setValue(payload.c_str());
+  if (notify && deviceConnected)
+  {
+    pEffectsDataCharacteristic->notify();
+  }
+}
+
+void BLEManager::updateEffectsCommandResponse(const String &response, bool notify)
+{
+  lastEffectsCommandResponse = response;
+
+  if (!pEffectsCommandCharacteristic)
+  {
+    return;
+  }
+
+  pEffectsCommandCharacteristic->setValue(lastEffectsCommandResponse.c_str());
+  if (notify && deviceConnected)
+  {
+    pEffectsCommandCharacteristic->notify();
+  }
 }
 
 BLESyncSendData BLEManager::prepareSyncData()
@@ -434,71 +600,63 @@ void BLEManager::handleModeWrite(BLECharacteristic *pCharacteristic)
   }
 }
 
-void BLEManager::handleEffectsWrite(BLECharacteristic *pCharacteristic)
+void BLEManager::handleEffectsRequestWrite(BLECharacteristic *pCharacteristic)
+{
+  std::string value = pCharacteristic->getValue();
+  if (value.empty())
+  {
+    Serial.println("BLE Effects Request: Empty payload");
+    return;
+  }
+
+  DynamicJsonDocument doc(512);
+  DeserializationError error = deserializeJson(doc, value);
+  if (error)
+  {
+    Serial.println("BLE Effects Request: Invalid JSON");
+    return;
+  }
+
+  const char *resource = doc["resource"] | "catalog";
+  selectedEffectsResource = (String(resource) == "state") ? EffectsResource::State : EffectsResource::Catalog;
+  selectedEffectsChunk = doc["chunk"] | 0;
+
+  Serial.printf("BLE Effects Request: %s chunk %u\n", resource, selectedEffectsChunk);
+  updateEffectsDataCharacteristic(true);
+}
+
+void BLEManager::handleEffectsCommandWrite(BLECharacteristic *pCharacteristic)
 {
   if (!app)
+  {
+    updateEffectsCommandResponse("{\"ok\":false,\"error\":\"application unavailable\"}", true);
     return;
+  }
 
   std::string value = pCharacteristic->getValue();
-  if (value.length() != sizeof(BLEEffectsData))
+  if (value.empty())
   {
-    Serial.println("BLE Effects: Invalid data size");
+    updateEffectsCommandResponse("{\"ok\":false,\"error\":\"empty payload\"}", true);
     return;
   }
 
-  BLEEffectsData *data = (BLEEffectsData *)value.data();
-  Serial.println("BLE Effects: Updating effects");
+  String response;
+  bool ok = BLEEffectsCatalog::applyCommand(*app, String(value.c_str()), response);
+  refreshEffectsStateCache(true);
 
-  // Update indicators
-  if (app->leftIndicatorEffect)
-    app->leftIndicatorEffect->setActive(data->leftIndicator);
-  if (app->rightIndicatorEffect)
-    app->rightIndicatorEffect->setActive(data->rightIndicator);
-
-  // Update headlight
-  if (app->headlightEffect)
+  DynamicJsonDocument doc(1024);
+  DeserializationError error = deserializeJson(doc, response);
+  if (!error)
   {
-    app->headlightEffect->setMode(data->headlightMode);
-    app->headlightEffect->setSplit(data->headlightSplit);
-    app->headlightEffect->setColor(data->headlightR, data->headlightG, data->headlightB);
+    doc["stateRevision"] = effectsStateRevision;
+    response = "";
+    serializeJson(doc, response);
   }
 
-  // Update taillight
-  if (app->taillightEffect)
+  updateEffectsCommandResponse(response, true);
+  if (ok && selectedEffectsResource == EffectsResource::State)
   {
-    app->taillightEffect->setMode(data->taillightMode);
-    app->taillightEffect->setSplit(data->taillightSplit);
-  }
-
-  // Update other effects
-  if (app->rgbEffect)
-    app->rgbEffect->setActive(data->rgb);
-  if (app->nightriderEffect)
-    app->nightriderEffect->setActive(data->nightrider);
-  if (app->policeEffect)
-  {
-    app->policeEffect->setActive(data->police);
-    app->policeEffect->setMode(static_cast<PoliceMode>(data->policeMode));
-  }
-  if (app->pulseWaveEffect)
-    app->pulseWaveEffect->setActive(data->pulseWave);
-  if (app->auroraEffect)
-    app->auroraEffect->setActive(data->aurora);
-  if (app->solidColorEffect)
-  {
-    app->solidColorEffect->setActive(data->solidColor);
-    app->solidColorEffect->setColorPreset(static_cast<SolidColorPreset>(data->solidColorPreset));
-    app->solidColorEffect->setCustomColor(data->solidColorR, data->solidColorG, data->solidColorB);
-  }
-  if (app->colorFadeEffect)
-    app->colorFadeEffect->setActive(data->colorFade);
-  if (app->commitEffect)
-    app->commitEffect->setActive(data->commit);
-
-  if (app->serviceLightsEffect)
-  {
-    app->serviceLightsEffect->setActive(data->serviceLights);
-    app->serviceLightsEffect->setMode(static_cast<ServiceLightsMode>(data->serviceLightsMode));
+    updateEffectsDataCharacteristic(true);
   }
 }
 
@@ -608,9 +766,13 @@ void CarThingBLECharacteristicCallbacks::onWrite(BLECharacteristic *pCharacteris
   {
     bleManager->handleModeWrite(pCharacteristic);
   }
-  else if (characteristicName == "Effects")
+  else if (characteristicName == "Effects Request")
   {
-    bleManager->handleEffectsWrite(pCharacteristic);
+    bleManager->handleEffectsRequestWrite(pCharacteristic);
+  }
+  else if (characteristicName == "Effects Command")
+  {
+    bleManager->handleEffectsCommandWrite(pCharacteristic);
   }
   else if (characteristicName == "Strip Active")
   {
@@ -637,10 +799,17 @@ void CarThingBLECharacteristicCallbacks::onRead(BLECharacteristic *pCharacterist
     BLEModeData data = bleManager->prepareModeData();
     pCharacteristic->setValue((uint8_t *)&data, sizeof(data));
   }
-  else if (characteristicName == "Effects")
+  else if (characteristicName == "Effects Info")
   {
-    BLEEffectsData data = bleManager->prepareEffectsData();
-    pCharacteristic->setValue((uint8_t *)&data, sizeof(data));
+    bleManager->updateEffectsInfoCharacteristic(false);
+  }
+  else if (characteristicName == "Effects Data")
+  {
+    bleManager->updateEffectsDataCharacteristic(false);
+  }
+  else if (characteristicName == "Effects Command")
+  {
+    bleManager->updateEffectsCommandResponse(bleManager->lastEffectsCommandResponse, false);
   }
   else if (characteristicName == "Strip Active")
   {
@@ -653,3 +822,5 @@ void CarThingBLECharacteristicCallbacks::onRead(BLECharacteristic *pCharacterist
     pCharacteristic->setValue((uint8_t *)&data, sizeof(data));
   }
 }
+
+#endif

@@ -1,23 +1,37 @@
 #pragma once
 
 #include <Arduino.h>
+#if defined(CONFIG_BLUEDROID_ENABLED)
 #include <BLEDevice.h>
 #include <BLEServer.h>
 #include <BLEUtils.h>
 #include <BLE2902.h>
+#define BLE_TRANSPORT_AVAILABLE 1
+#else
+#define BLE_TRANSPORT_AVAILABLE 0
+class BLEServer;
+class BLEService;
+class BLECharacteristic;
+#endif
 #include <functional>
 #include "config.h"
+#include "IO/BLEEffectsCatalog.h"
 #include "IO/LED/Types.h"
 
 // BLE Service and Characteristic UUIDs
 #define BLE_SERVICE_UUID "51afeb92-c5fe-4efb-bf6f-5b9baf50d87f"
 
-// Only 3 Characteristics
+// Core Characteristics
 #define PING_CHARACTERISTIC_UUID "7285c8f6-30eb-4266-b5c3-7a34ba69a8b7"
 #define MODE_CHARACTERISTIC_UUID "44969bf5-4a79-4fce-8acd-3b794f81c380"
-#define EFFECTS_CHARACTERISTIC_UUID "7645b13d-3f3b-4046-8929-05c1c72e2900"
 #define STRIP_ACTIVE_CHARACTERISTIC_UUID "63caefc6-8a24-4da2-ac3d-367b3f7c6be3"
 #define SYNC_CHARACTERISTIC_UUID "192c22a9-547e-4c4f-b0f1-0e197042ee9b"
+
+// Effects protocol v2 characteristics
+#define EFFECTS_INFO_CHARACTERISTIC_UUID "4a57d9fe-12a5-4d0f-9d18-d9134f450101"
+#define EFFECTS_REQUEST_CHARACTERISTIC_UUID "4a57d9fe-12a5-4d0f-9d18-d9134f450102"
+#define EFFECTS_DATA_CHARACTERISTIC_UUID "4a57d9fe-12a5-4d0f-9d18-d9134f450103"
+#define EFFECTS_COMMAND_CHARACTERISTIC_UUID "4a57d9fe-12a5-4d0f-9d18-d9134f450104"
 
 // Simplified BLE Data Structures
 struct __attribute__((packed)) BLEPingData
@@ -36,36 +50,6 @@ struct __attribute__((packed)) BLEPingData
 struct __attribute__((packed)) BLEModeData
 {
   uint8_t mode; // 0=NORMAL, 1=TEST, 2=REMOTE, 3=OFF
-};
-
-struct __attribute__((packed)) BLEEffectsData
-{
-  bool leftIndicator;
-  bool rightIndicator;
-  uint8_t headlightMode;
-  bool headlightSplit;
-  bool headlightR;
-  bool headlightG;
-  bool headlightB;
-  uint8_t taillightMode;
-  bool taillightSplit;
-  bool brake;
-  bool reverse;
-  bool rgb;
-  bool nightrider;
-  bool police;
-  uint8_t policeMode;
-  bool pulseWave;
-  bool aurora;
-  bool solidColor;
-  uint8_t solidColorPreset;
-  uint8_t solidColorR;
-  uint8_t solidColorG;
-  uint8_t solidColorB;
-  bool colorFade;
-  bool commit;
-  bool serviceLights;
-  uint8_t serviceLightsMode;
 };
 
 struct __attribute__((packed)) BLEStripActiveData
@@ -144,6 +128,8 @@ struct __attribute__((packed)) BLESyncReceiveData
 
 // Forward declarations
 class Application;
+class CarThingBLEServerCallbacks;
+class CarThingBLECharacteristicCallbacks;
 
 class BLEManager
 {
@@ -179,7 +165,10 @@ private:
   // Characteristic pointers
   BLECharacteristic *pPingCharacteristic;
   BLECharacteristic *pModeCharacteristic;
-  BLECharacteristic *pEffectsCharacteristic;
+  BLECharacteristic *pEffectsInfoCharacteristic;
+  BLECharacteristic *pEffectsRequestCharacteristic;
+  BLECharacteristic *pEffectsDataCharacteristic;
+  BLECharacteristic *pEffectsCommandCharacteristic;
   BLECharacteristic *pStripActiveCharacteristic;
   BLECharacteristic *pSyncCharacteristic;
 
@@ -193,25 +182,46 @@ private:
   // Timing
   uint32_t lastPingUpdate;
   uint32_t lastSyncUpdate;
+  uint32_t lastEffectsStatePoll;
+
+  enum class EffectsResource : uint8_t
+  {
+    Catalog,
+    State
+  };
+
+  EffectsResource selectedEffectsResource;
+  uint16_t selectedEffectsChunk;
+  uint32_t effectsStateRevision;
+  String cachedEffectsStateJson;
+  String lastEffectsInfoJson;
+  String lastEffectsCommandResponse;
 
   void setupCharacteristics();
   void setupCallbacks();
 
   // Simplified characteristic callback handlers
   void handleModeWrite(BLECharacteristic *pCharacteristic);
-  void handleEffectsWrite(BLECharacteristic *pCharacteristic);
+  void handleEffectsRequestWrite(BLECharacteristic *pCharacteristic);
+  void handleEffectsCommandWrite(BLECharacteristic *pCharacteristic);
   void handleStripActiveWrite(BLECharacteristic *pCharacteristic);
   void handleSyncWrite(BLECharacteristic *pCharacteristic);
 
   // Simplified data preparation methods
   BLEPingData preparePingData();
   BLEModeData prepareModeData();
-  BLEEffectsData prepareEffectsData();
   BLEStripActiveData prepareStripActiveData();
   BLESyncSendData prepareSyncData();
+  String prepareEffectsInfo();
+  String prepareEffectsDataChunk();
+  void refreshEffectsStateCache(bool notifyInfo);
+  void updateEffectsInfoCharacteristic(bool notify);
+  void updateEffectsDataCharacteristic(bool notify);
+  void updateEffectsCommandResponse(const String &response, bool notify);
 };
 
 // BLE Server Callbacks
+#if BLE_TRANSPORT_AVAILABLE
 class CarThingBLEServerCallbacks : public BLEServerCallbacks
 {
 public:
@@ -235,3 +245,4 @@ private:
   BLEManager *bleManager;
   String characteristicName;
 };
+#endif
