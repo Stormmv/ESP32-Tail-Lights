@@ -93,7 +93,7 @@ void loadLEDConfig();
 #ifdef S3_V1
 #define LED_PIN 40 // make optinal
 
-#define ENABLE_HV_INPUTS
+// #define ENABLE_HV_INPUTS
 
 #define INPUT_BTN_BOOT_PIN 0
 #define INPUT_BTN_PREV_PIN 21
@@ -111,7 +111,7 @@ void loadLEDConfig();
 #define INPUT_7_PIN 17
 #define INPUT_8_PIN 18
 
-#define OUTPUT_STATUS_LED_PIN 1
+#define OUTPUT_STATUS_LED_PIN 48
 
 #define OUTPUT_LED_1_PIN 3
 #define OUTPUT_LED_2_PIN 10
